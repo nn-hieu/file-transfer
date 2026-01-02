@@ -8,8 +8,9 @@ import lombok.*;
 @AllArgsConstructor
 @ToString
 public class FileMetadata {
-    private String id;
+    private String fileId;
     private String fileName;
+    private int chunkSizeInBytes;
     private int totalChunks;
     private String contentType;
     private String checksum;
