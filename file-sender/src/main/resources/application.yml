@@ -19,3 +19,6 @@ server:
 
 file:
   chunk-size: 1MB
+
+app:
+  folder-name: sent_files

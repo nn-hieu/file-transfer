@@ -10,4 +10,6 @@ public interface FileService {
     void sendFileMetadata(FileMetadata fileMetadata, String targetService);
 
     void sendChunkFile(ChunkFile chunkFile, String targetService);
+
+    void resendSpecificChunk(FileMetadata metadata, int index, String targetService);
 }

@@ -12,6 +12,7 @@ import lombok.Setter;
 public class FileMetadata {
     private String fileId;
     private String fileName;
+    private long fileSize;
     private long chunkSizeInBytes;
     private int totalChunks;
     private String contentType;
