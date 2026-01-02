@@ -47,6 +47,9 @@ public class FileServiceImpl implements FileService {
     @Value("${app.folder-name}")
     private String folderName;
 
+    @Value("${spring.application.name}")
+    private String serviceName;
+
     @PostConstruct
     protected void createFolderForStoringFiles() {
         try {
@@ -102,6 +105,7 @@ public class FileServiceImpl implements FileService {
         metaData.setFileName(file.getOriginalFilename());
         metaData.setContentType(file.getContentType());
         metaData.setChunkSizeInBytes(chunkSize.toBytes());
+        metaData.setSourceService(serviceName);
 
         long fileSize = file.getSize();
         metaData.setFileSize(fileSize);
@@ -202,6 +206,17 @@ public class FileServiceImpl implements FileService {
 
         } catch (IOException e) {
             log.error("Cannot read file chunk for resend", e);
+        }
+    }
+
+    @Override
+    public void handleFileCompleted(FileMetadata fileMetadata) {
+        Path tempFilePath = Paths.get(folderName, fileMetadata.getFileId() + ".tmp");
+
+        try {
+            Files.deleteIfExists(tempFilePath);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot delete temp file", e);
         }
     }
 }

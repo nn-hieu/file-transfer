@@ -17,4 +17,5 @@ public class FileMetadata {
     private int totalChunks;
     private String contentType;
     private String checksum;
+    private String sourceService;
 }
