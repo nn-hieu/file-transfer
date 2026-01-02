@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: file-receiver
+
+mqtt:
+  broker: tcp://localhost:1883
+  client-id: file-receiver
+  topic:
+    file:
+      meta-data: udc/file-transfer/meta-data
+      chunk: udc/file-transfer/chunk
+
+server:
+  port: 8081
+
+app:
+  folder-name: received_files

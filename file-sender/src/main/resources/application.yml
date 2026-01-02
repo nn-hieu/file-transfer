@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: file-sender
+  servlet:
+    multipart:
+      max-file-size: -1
+      max-request-size: -1
+
+mqtt:
+  broker: tcp://localhost:1883
+  client-id: file-sender
+  topic:
+    file:
+      meta-data: udc/file-transfer/meta-data
+      chunk: udc/file-transfer/chunk
+
+server:
+  port: 8082
+
+file:
+  chunk-size: 1MB
