@@ -4,7 +4,9 @@ import com.hieunn.filesender.dtos.ChunkFile;
 import com.hieunn.filesender.dtos.FileMetadata;
 import com.hieunn.filesender.services.FileService;
 import com.hieunn.filesender.utils.ObjectUtils;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -13,15 +15,22 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class FileServiceImpl implements FileService {
     private final MqttClient mqttClient;
     private final ObjectUtils objectUtils;
@@ -35,47 +44,106 @@ public class FileServiceImpl implements FileService {
     @Value("${file.chunk-size}")
     private DataSize chunkSize;
 
+    @Value("${app.folder-name}")
+    private String folderName;
+
+    @Value("${spring.application.name}")
+    private String serviceName;
+
+    @PostConstruct
+    protected void createFolderForStoringFiles() {
+        try {
+            Path sentDir = Paths.get(folderName);
+            if (Files.notExists(sentDir)) {
+                Files.createDirectories(sentDir);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot create folder", e);
+        }
+    }
+
     @Override
     public void sendFile(MultipartFile file, String targetService) {
-        byte[] fileBytes;
-        MessageDigest digest;
-        try {
-            fileBytes = file.getBytes();
-            digest = MessageDigest.getInstance("SHA-256");
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot get file bytes", e);
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 not supported", e);
-        }
+        String fileId = UUID.randomUUID().toString();
+        Path tempFilePath = Paths.get(folderName, fileId + ".tmp");
 
+        try {
+            file.transferTo(tempFilePath);
+
+            FileMetadata metaData = this.buildFileMetadata(file, fileId, tempFilePath);
+            this.sendFileMetadata(metaData, targetService);
+
+            try (RandomAccessFile raf = new RandomAccessFile(tempFilePath.toFile(), "r")) {
+                int chunkSizeInBytes = (int) chunkSize.toBytes();
+
+                ChunkFile chunkFile = new ChunkFile();
+                chunkFile.setFileId(fileId);
+                for (int i = 0; i < metaData.getTotalChunks(); ++i) {
+                    byte[] data = this.readChunkData(raf, i, chunkSizeInBytes, metaData.getFileSize());
+                    chunkFile.setIndex(i);
+                    chunkFile.setData(data);
+
+                    this.sendChunkFile(chunkFile, targetService);
+                }
+            }
+
+            log.info("Send file successfully: fileId={}, fileName={}", fileId, metaData.getFileName());
+        } catch (IOException | NoSuchAlgorithmException e) {
+            log.error("Error processing file send", e);
+            try {
+                Files.deleteIfExists(tempFilePath);
+            } catch (IOException ex) {
+                log.error("Error deleting temp file", ex);
+            }
+        }
+    }
+
+    private FileMetadata buildFileMetadata(MultipartFile file, String fileId, Path tempFilePath)
+            throws IOException, NoSuchAlgorithmException {
         FileMetadata metaData = new FileMetadata();
-        metaData.setFileId(UUID.randomUUID().toString());
+        metaData.setFileId(fileId);
         metaData.setFileName(file.getOriginalFilename());
         metaData.setContentType(file.getContentType());
         metaData.setChunkSizeInBytes(chunkSize.toBytes());
+        metaData.setSourceService(serviceName);
 
         long fileSize = file.getSize();
+        metaData.setFileSize(fileSize);
+
         int chunkSizeInBytes = (int) chunkSize.toBytes();
-        int totalChunks = (int) ((fileSize + chunkSizeInBytes - 1) / chunkSizeInBytes);
+        int totalChunks = (int) Math.ceil((double) fileSize / chunkSizeInBytes);
         metaData.setTotalChunks(totalChunks);
 
-        byte[] hash = digest.digest(fileBytes);
-        String checksum = HexFormat.of().formatHex(hash);
+        String checksum = this.calculateFileChecksum(tempFilePath);
         metaData.setChecksum(checksum);
 
-        this.sendFileMetadata(metaData, targetService);
+        return metaData;
+    }
 
-        ChunkFile chunkFile = new ChunkFile();
-        chunkFile.setFileId(metaData.getFileId());
-        for (int i = 0; i < totalChunks; i++) {
-            int start = i * chunkSizeInBytes;
-            int end = Math.min(fileBytes.length, (i + 1) * chunkSizeInBytes);
-            byte[] chunkFileData = Arrays.copyOfRange(fileBytes, start, end);
-            chunkFile.setIndex(i);
-            chunkFile.setData(chunkFileData);
+    private String calculateFileChecksum(Path filePath) throws IOException, NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (
+                InputStream is = new FileInputStream(filePath.toFile());
+                DigestInputStream dis = new DigestInputStream(is, digest)
+        ) {
+            byte[] buffer = new byte[32 * 1024];
+            while (dis.read(buffer) != -1) {
 
-            this.sendChunkFile(chunkFile, targetService);
+            }
         }
+
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private byte[] readChunkData(RandomAccessFile raf, int index, int chunkSize, long totalFileSize) throws IOException {
+        long offset = (long) index * chunkSize;
+        raf.seek(offset);
+
+        int currentChunkSize = (int) Math.min(chunkSize, totalFileSize - offset);
+        byte[] buffer = new byte[currentChunkSize];
+
+        raf.readFully(buffer);
+        return buffer;
     }
 
     @Override
@@ -108,6 +176,47 @@ public class FileServiceImpl implements FileService {
             throw new RuntimeException("Cannot publish chunk to MQTT", e);
         } catch (IOException e) {
             throw new RuntimeException("Cannot convert chunk file to bytes", e);
+        }
+    }
+
+    @Override
+    public void resendSpecificChunk(FileMetadata metadata, int index, String targetService) {
+        Path filePath = Paths.get(folderName, metadata.getFileId() + ".tmp");
+        if (Files.notExists(filePath)) {
+            log.error("File cache not found for fileId: {}", metadata.getFileId());
+            return;
+        }
+
+        try (RandomAccessFile raf = new RandomAccessFile(filePath.toFile(), "r")) {
+            int chunkSizeInBytes = (int) chunkSize.toBytes();
+            long fileSize = Files.size(filePath);
+
+            byte[] data = this.readChunkData(raf, index, chunkSizeInBytes, fileSize);
+
+            ChunkFile chunkFile = new ChunkFile();
+            chunkFile.setFileId(metadata.getFileId());
+            chunkFile.setIndex(index);
+            chunkFile.setData(data);
+
+            log.info(
+                    "Resending chunk {} for file: fileId={}, fileName={}",
+                    index, metadata.getFileId(), metadata.getFileName()
+            );
+            this.sendChunkFile(chunkFile, targetService);
+
+        } catch (IOException e) {
+            log.error("Cannot read file chunk for resend", e);
+        }
+    }
+
+    @Override
+    public void handleFileCompleted(FileMetadata fileMetadata) {
+        Path tempFilePath = Paths.get(folderName, fileMetadata.getFileId() + ".tmp");
+
+        try {
+            Files.deleteIfExists(tempFilePath);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot delete temp file", e);
         }
     }
 }

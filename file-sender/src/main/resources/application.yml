@@ -11,11 +11,15 @@ mqtt:
   client-id: file-sender
   topic:
     file:
-      meta-data: udc/file-transfer/meta-data
-      chunk: udc/file-transfer/chunk
+      meta-data: file-transfer/meta-data
+      chunk: file-transfer/chunk
+      transfer-completed: file-transfer/completed
 
 server:
   port: 8082
 
 file:
   chunk-size: 1MB
+
+app:
+  folder-name: sent_files
