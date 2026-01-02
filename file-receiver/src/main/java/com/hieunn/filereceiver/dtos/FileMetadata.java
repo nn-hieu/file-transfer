@@ -10,8 +10,10 @@ import lombok.*;
 public class FileMetadata {
     private String fileId;
     private String fileName;
-    private int chunkSizeInBytes;
+    private long fileSize;
+    private long chunkSizeInBytes;
     private int totalChunks;
     private String contentType;
     private String checksum;
+    private String sourceService;
 }
