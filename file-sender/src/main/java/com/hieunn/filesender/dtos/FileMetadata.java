@@ -10,8 +10,9 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 public class FileMetadata {
-    private String id;
+    private String fileId;
     private String fileName;
+    private long chunkSizeInBytes;
     private int totalChunks;
     private String contentType;
     private String checksum;

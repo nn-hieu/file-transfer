@@ -49,9 +49,10 @@ public class FileServiceImpl implements FileService {
         }
 
         FileMetadata metaData = new FileMetadata();
-        metaData.setId(UUID.randomUUID().toString());
+        metaData.setFileId(UUID.randomUUID().toString());
         metaData.setFileName(file.getOriginalFilename());
         metaData.setContentType(file.getContentType());
+        metaData.setChunkSizeInBytes(chunkSize.toBytes());
 
         long fileSize = file.getSize();
         int chunkSizeInBytes = (int) chunkSize.toBytes();
@@ -65,20 +66,13 @@ public class FileServiceImpl implements FileService {
         this.sendFileMetadata(metaData, targetService);
 
         ChunkFile chunkFile = new ChunkFile();
-        chunkFile.setFileId(metaData.getId());
+        chunkFile.setFileId(metaData.getFileId());
         for (int i = 0; i < totalChunks; i++) {
             int start = i * chunkSizeInBytes;
             int end = Math.min(fileBytes.length, (i + 1) * chunkSizeInBytes);
             byte[] chunkFileData = Arrays.copyOfRange(fileBytes, start, end);
             chunkFile.setIndex(i);
             chunkFile.setData(chunkFileData);
-
-//            if (chunkFileData.length > 10) {
-//                chunkFileData[0] = (byte) 0x55;
-//                chunkFileData[10] = (byte) 0x00;
-//                chunkFileData[9] = (byte) 0x00;
-//                chunkFileData[8] = (byte) 0x00;
-//            }
 
             this.sendChunkFile(chunkFile, targetService);
         }
