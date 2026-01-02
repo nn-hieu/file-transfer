@@ -5,9 +5,13 @@ import com.hieunn.filereceiver.dtos.FileChunkState;
 import com.hieunn.filereceiver.dtos.FileMetadata;
 import com.hieunn.filereceiver.enums.CacheName;
 import com.hieunn.filereceiver.services.FileService;
+import com.hieunn.filereceiver.utils.ObjectUtils;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -31,6 +35,11 @@ import java.util.HexFormat;
 @RequiredArgsConstructor
 public class FileServiceImpl implements FileService {
     private final CacheManager cacheManager;
+    private final MqttClient mqttClient;
+    private final ObjectUtils objectUtils;
+
+    @Value("${mqtt.topic.file.transfer-completed}")
+    private String fileTransferCompletedTopic;
 
     @Value("${app.folder-name}")
     private String folderName;
@@ -62,7 +71,7 @@ public class FileServiceImpl implements FileService {
 
             // Write data of chunk file into temp file
             try (RandomAccessFile raf = new RandomAccessFile(targetFilePath.toFile(), "rw")) {
-                long offset = (long) chunkFile.getIndex() * metadata.getChunkSizeInBytes();
+                long offset = chunkFile.getIndex() * metadata.getChunkSizeInBytes();
                 raf.seek(offset);
                 raf.write(chunkFile.getData());
             }
@@ -88,6 +97,23 @@ public class FileServiceImpl implements FileService {
         } catch (IOException e) {
             log.error("Error writing chunk file for fileId={}", chunkFile.getFileId(), e);
             throw new RuntimeException("Cannot process chunk file", e);
+        }
+    }
+
+    private void sendEventFileCompleted(FileMetadata fileMetadata, String targetService) {
+        try {
+            MqttMessage message = new MqttMessage();
+            message.setPayload(objectUtils.convertObjectToBytes(fileMetadata));
+            message.setQos(1);
+
+            mqttClient.publish(
+                    fileTransferCompletedTopic + "/" + targetService,
+                    message
+            );
+        } catch (MqttException e) {
+            throw new RuntimeException("Cannot publish chunk to MQTT", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot convert chunk file to bytes", e);
         }
     }
 
@@ -124,8 +150,8 @@ public class FileServiceImpl implements FileService {
             }
         }
 
+        // Verify checksum
         String calculatedChecksum = HexFormat.of().formatHex(digest.digest());
-
         if (!calculatedChecksum.equalsIgnoreCase(metadata.getChecksum())) {
             log.error(
                     "Checksum mismatch for fileId={}, fileName={}. Expected={}, Actual={}",
@@ -139,6 +165,7 @@ public class FileServiceImpl implements FileService {
             return;
         }
 
+        // Rename temp file with actual name
         Files.move(
                 tempFilePath,
                 finalFilePath,
@@ -146,16 +173,13 @@ public class FileServiceImpl implements FileService {
                 StandardCopyOption.ATOMIC_MOVE
         );
 
+        this.sendEventFileCompleted(metadata, metadata.getSourceService());
+
         log.info("Received successfully new file: {}", finalFilePath);
     }
 
     private void cleanupFolder(String fileId) throws IOException {
         Path fileDir = Paths.get(folderName, fileId);
-
-        if (Files.notExists(fileDir)) {
-            return;
-        }
-
         Files.deleteIfExists(fileDir);
     }
 
