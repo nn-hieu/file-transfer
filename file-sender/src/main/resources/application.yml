@@ -21,6 +21,7 @@ server:
 
 file:
   chunk-size: 1MB
+  max-resend-times: 1
 
 app:
   folder-name: file-sender/sent_files

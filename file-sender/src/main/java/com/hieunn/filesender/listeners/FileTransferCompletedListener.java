@@ -1,4 +1,4 @@
-package com.hieunn.filesender.listners;
+package com.hieunn.filesender.listeners;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,7 +10,7 @@ import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 
 @RequiredArgsConstructor
-public class ResendFileListener implements IMqttMessageListener {
+public class FileTransferCompletedListener implements IMqttMessageListener {
     private final ObjectMapper objectMapper;
     private final FileService fileService;
     private final String serviceName;
@@ -24,6 +24,6 @@ public class ResendFileListener implements IMqttMessageListener {
             return;
         }
 
-        fileService.resendFile(envelope.getPayload(), envelope.getSourceService());
+        fileService.handleFileCompleted(envelope);
     }
 }

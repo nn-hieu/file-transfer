@@ -4,6 +4,8 @@ import com.hieunn.commonlib.dtos.ChunkFile;
 import com.hieunn.commonlib.dtos.FileMetadata;
 import com.hieunn.commonlib.dtos.MqttEnvelope;
 import com.hieunn.commonlib.utils.ObjectUtils;
+import com.hieunn.filesender.dtos.FileState;
+import com.hieunn.filesender.enums.CacheName;
 import com.hieunn.filesender.services.FileService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +14,8 @@ import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
@@ -35,6 +39,7 @@ import java.util.UUID;
 public class FileServiceImpl implements FileService {
     private final MqttClient mqttClient;
     private final ObjectUtils objectUtils;
+    private final CacheManager cacheManager;
 
     @Value("${mqtt.topic.file.meta-data}")
     private String fileMetaTopic;
@@ -50,6 +55,9 @@ public class FileServiceImpl implements FileService {
 
     @Value("${spring.application.name}")
     private String serviceName;
+
+    @Value("${file.max-resend-times}")
+    private int maxResendTimes;
 
     @PostConstruct
     protected void createFolderForStoringFiles() {
@@ -67,6 +75,8 @@ public class FileServiceImpl implements FileService {
     public void sendFile(MultipartFile file, String targetService) {
         String fileId = UUID.randomUUID().toString();
         Path tempFilePath = Paths.get(folderName, fileId + ".tmp");
+
+        log.info("Sending file...: fileId={}, fileName={}", fileId, file.getOriginalFilename());
 
         try {
             file.transferTo(tempFilePath);
@@ -88,7 +98,11 @@ public class FileServiceImpl implements FileService {
                 }
             }
 
-            log.info("Send file successfully: fileId={}, fileName={}", fileId, metaData.getFileName());
+            FileState fileState = new FileState();
+            Cache fileStateCache = cacheManager.getCache(CacheName.FILE_STATE.getValue());
+            fileStateCache.put(fileId, fileState);
+
+            log.info("Sent file successfully: fileId={}, fileName={}", fileId, metaData.getFileName());
         } catch (IOException | NoSuchAlgorithmException e) {
             log.error("Error processing file send", e);
             try {
@@ -206,13 +220,22 @@ public class FileServiceImpl implements FileService {
             this.sendChunkFile(chunkFile, targetService);
 
         } catch (IOException e) {
-            log.error("Cannot read file chunk for resend", e);
+            throw new RuntimeException("Cannot resend chunk file", e);
         }
     }
 
     @Override
     public void resendFile(FileMetadata metadata, String targetService) {
-        log.info("Resending file: fileId={}", metadata.getFileId());
+        log.info("Resending file...: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
+
+        Cache fileStateCache = cacheManager.getCache(CacheName.FILE_STATE.getValue());
+        FileState fileState = fileStateCache.get(metadata.getFileId(), FileState.class);
+        if (fileState.getRetryTimes() >= maxResendTimes) {
+            this.cleanupCache(metadata.getFileId());
+
+            log.error("Reach max resend times");
+            return;
+        }
 
         Path tempFilePath = Paths.get(folderName, metadata.getFileId() + ".tmp");
         if (Files.notExists(tempFilePath)) {
@@ -242,8 +265,11 @@ public class FileServiceImpl implements FileService {
                 }
             }
 
+            fileState.setRetryTimes(fileState.getRetryTimes() + 1);
+            fileStateCache.put(metadata.getFileId(), fileState);
+
             log.info(
-                    "Resend file successfully: fileId={}, fileName={}",
+                    "Resent file successfully: fileId={}, fileName={}",
                     metadata.getFileId(),
                     metadata.getFileName()
             );
@@ -256,12 +282,21 @@ public class FileServiceImpl implements FileService {
     public void handleFileCompleted(MqttEnvelope<FileMetadata> envelope) {
         FileMetadata fileMetadata = envelope.getPayload();
 
+        this.cleanupCache(fileMetadata.getFileId());
+
         Path tempFilePath = Paths.get(folderName, fileMetadata.getFileId() + ".tmp");
 
         try {
             Files.deleteIfExists(tempFilePath);
         } catch (IOException e) {
             log.error("Cannot delete temp file: {}", tempFilePath);
+        }
+    }
+
+    private void cleanupCache(String fileId) {
+        Cache fileStateCache = cacheManager.getCache(CacheName.FILE_STATE.getValue());
+        if (fileStateCache != null) {
+            fileStateCache.evict(fileId);
         }
     }
 }

@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.eclipse.paho.client.mqttv3.MqttPersistenceException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -42,24 +43,44 @@ public class FileServiceImpl implements FileService {
     @Value("${mqtt.topic.file.transfer-completed}")
     private String fileTransferCompletedTopic;
 
+    @Value("${mqtt.topic.file.resend-file}")
+    private String fileResendTopic;
+
     @Value("${app.folder-name}")
     private String folderName;
 
     @Value("${spring.application.name}")
     private String serviceName;
 
+    @PostConstruct
+    protected void createFolderForStoringFiles() {
+        try {
+            Path receivedDir = Paths.get(folderName);
+
+            if (Files.notExists(receivedDir)) {
+                Files.createDirectories(receivedDir);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot create folder", e);
+        }
+    }
+
     @Override
     public void handleFileMetadata(MqttEnvelope<FileMetadata> envelope) {
-        FileMetadata fileMetadata = envelope.getPayload();
+        FileMetadata metadata = envelope.getPayload();
+
+        log.info("Received file metadata: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
 
         Cache cache = cacheManager.getCache(CacheName.FILE_META_DATA.getValue());
         assert cache != null;
-        cache.put(fileMetadata.getFileId(), fileMetadata);
+        cache.put(metadata.getFileId(), metadata);
     }
 
     @Override
     public void handleChunkFile(MqttEnvelope<ChunkFile> envelope) {
         ChunkFile chunkFile = envelope.getPayload();
+
+        log.info("Received chunk file: index={}, fileId={}", chunkFile.getIndex(), chunkFile.getFileId());
 
         try {
             // Get metadata from cache
@@ -103,20 +124,22 @@ public class FileServiceImpl implements FileService {
                 this.cleanupCache(chunkFile.getFileId());
             }
         } catch (IOException e) {
-            log.error("Error writing chunk file for fileId={}", chunkFile.getFileId(), e);
             throw new RuntimeException("Cannot process chunk file", e);
         }
     }
 
-    private void sendEventFileCompleted(FileMetadata fileMetadata, String targetService) {
+    private void sendEventFileCompleted(FileMetadata metadata, String targetService) {
+        log.info("Sending event file completed...: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
         try {
-            MqttEnvelope<FileMetadata> envelope = new MqttEnvelope<>(serviceName, targetService, fileMetadata);
+            MqttEnvelope<FileMetadata> envelope = new MqttEnvelope<>(serviceName, targetService, metadata);
 
             MqttMessage message = new MqttMessage();
             message.setPayload(objectUtils.convertObjectToBytes(envelope));
             message.setQos(1);
 
             mqttClient.publish(fileTransferCompletedTopic, message);
+
+            log.info("Sent event file completed successfully: fileId={}", metadata.getFileId());
         } catch (MqttException e) {
             throw new RuntimeException("Cannot publish chunk to MQTT", e);
         } catch (IOException e) {
@@ -124,20 +147,9 @@ public class FileServiceImpl implements FileService {
         }
     }
 
-    @PostConstruct
-    protected void createFolderForStoringFiles() {
-        try {
-            Path receivedDir = Paths.get(folderName);
-
-            if (Files.notExists(receivedDir)) {
-                Files.createDirectories(receivedDir);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot create folder", e);
-        }
-    }
-
     private void finalizeFile(Path tempFilePath, FileMetadata metadata, MqttEnvelope<?> envelope) throws IOException {
+        log.info("Merging chunk and verifying checksum...: fileId={}", metadata.getFileId());
+
         Path finalFilePath = tempFilePath.getParent().resolve(metadata.getFileName());
 
         MessageDigest digest;
@@ -168,6 +180,8 @@ public class FileServiceImpl implements FileService {
             Files.deleteIfExists(tempFilePath);
             this.cleanupCache(metadata.getFileId());
             this.cleanupFolder(metadata.getFileId());
+
+            this.sendEventResendFile(metadata, envelope.getSourceService());
 
             return;
         }
@@ -200,6 +214,23 @@ public class FileServiceImpl implements FileService {
 
         if (chunkStateCache != null) {
             chunkStateCache.evict(fileId);
+        }
+    }
+
+    private void sendEventResendFile(FileMetadata metadata, String targetService) {
+        log.info("Sent event resend file: fileId={}", metadata.getFileId());
+        try {
+            MqttEnvelope<FileMetadata> envelope = new MqttEnvelope<>(serviceName, targetService, metadata);
+
+            MqttMessage message = new MqttMessage();
+            message.setPayload(objectUtils.convertObjectToBytes(envelope));
+            message.setQos(1);
+
+            mqttClient.publish(fileResendTopic, message);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot convert object to bytes", e);
+        } catch (MqttException e) {
+            throw new RuntimeException("Cannot publish message to MQTT", e);
         }
     }
 }

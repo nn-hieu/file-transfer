@@ -2,8 +2,8 @@ package com.hieunn.filesender.subscribers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hieunn.commonlib.events.MqttConnectedEvent;
-import com.hieunn.filesender.listners.FileTransferCompletedListener;
-import com.hieunn.filesender.listners.ResendFileListener;
+import com.hieunn.filesender.listeners.FileTransferCompletedListener;
+import com.hieunn.filesender.listeners.ResendFileListener;
 import com.hieunn.filesender.services.FileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
