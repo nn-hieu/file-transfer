@@ -1,17 +1,16 @@
-package com.hieunn.filereceiver.listeners;
+package com.hieunn.filesender.listners;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hieunn.commonlib.dtos.ChunkFile;
+import com.hieunn.commonlib.dtos.FileMetadata;
 import com.hieunn.commonlib.dtos.MqttEnvelope;
-import com.hieunn.filereceiver.services.FileService;
+import com.hieunn.filesender.services.FileService;
 import lombok.RequiredArgsConstructor;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
-import org.springframework.beans.factory.annotation.Value;
 
 @RequiredArgsConstructor
-public class FileChunkListener implements IMqttMessageListener {
+public class ResendFileListener implements IMqttMessageListener {
     private final ObjectMapper objectMapper;
     private final FileService fileService;
     private final String serviceName;
@@ -20,11 +19,11 @@ public class FileChunkListener implements IMqttMessageListener {
     public void messageArrived(String topic, MqttMessage mqttMessage) throws Exception {
         byte[] payload = mqttMessage.getPayload();
 
-        MqttEnvelope<ChunkFile> envelope = objectMapper.readValue(payload, new TypeReference<>() {});
+        MqttEnvelope<FileMetadata> envelope = objectMapper.readValue(payload, new TypeReference<>() {});
         if (!serviceName.equals(envelope.getTargetService())) {
             return;
         }
 
-        fileService.handleChunkFile(envelope);
+        fileService.resendFile(envelope.getPayload(), envelope.getSourceService());
     }
 }

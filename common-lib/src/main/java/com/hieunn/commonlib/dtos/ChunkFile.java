@@ -1,4 +1,4 @@
-package com.hieunn.filereceiver.dtos;
+package com.hieunn.commonlib.dtos;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

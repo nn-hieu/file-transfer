@@ -1,11 +1,12 @@
 package com.hieunn.filereceiver.services.impls;
 
-import com.hieunn.filereceiver.dtos.ChunkFile;
+import com.hieunn.commonlib.dtos.ChunkFile;
+import com.hieunn.commonlib.dtos.FileMetadata;
+import com.hieunn.commonlib.dtos.MqttEnvelope;
+import com.hieunn.commonlib.utils.ObjectUtils;
 import com.hieunn.filereceiver.dtos.FileChunkState;
-import com.hieunn.filereceiver.dtos.FileMetadata;
 import com.hieunn.filereceiver.enums.CacheName;
 import com.hieunn.filereceiver.services.FileService;
-import com.hieunn.filereceiver.utils.ObjectUtils;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,15 +45,22 @@ public class FileServiceImpl implements FileService {
     @Value("${app.folder-name}")
     private String folderName;
 
+    @Value("${spring.application.name}")
+    private String serviceName;
+
     @Override
-    public void handleFileMetadata(FileMetadata fileMetadata) {
+    public void handleFileMetadata(MqttEnvelope<FileMetadata> envelope) {
+        FileMetadata fileMetadata = envelope.getPayload();
+
         Cache cache = cacheManager.getCache(CacheName.FILE_META_DATA.getValue());
         assert cache != null;
         cache.put(fileMetadata.getFileId(), fileMetadata);
     }
 
     @Override
-    public void handleChunkFile(ChunkFile chunkFile) {
+    public void handleChunkFile(MqttEnvelope<ChunkFile> envelope) {
+        ChunkFile chunkFile = envelope.getPayload();
+
         try {
             // Get metadata from cache
             Cache metadataCache = cacheManager.getCache(CacheName.FILE_META_DATA.getValue());
@@ -91,7 +99,7 @@ public class FileServiceImpl implements FileService {
             if (state.getReceivedChunks().size() == metadata.getTotalChunks()
                     && state.getMerged().compareAndSet(false, true)
             ) {
-                this.finalizeFile(targetFilePath, metadata);
+                this.finalizeFile(targetFilePath, metadata, envelope);
                 this.cleanupCache(chunkFile.getFileId());
             }
         } catch (IOException e) {
@@ -102,14 +110,13 @@ public class FileServiceImpl implements FileService {
 
     private void sendEventFileCompleted(FileMetadata fileMetadata, String targetService) {
         try {
+            MqttEnvelope<FileMetadata> envelope = new MqttEnvelope<>(serviceName, targetService, fileMetadata);
+
             MqttMessage message = new MqttMessage();
-            message.setPayload(objectUtils.convertObjectToBytes(fileMetadata));
+            message.setPayload(objectUtils.convertObjectToBytes(envelope));
             message.setQos(1);
 
-            mqttClient.publish(
-                    fileTransferCompletedTopic + "/" + targetService,
-                    message
-            );
+            mqttClient.publish(fileTransferCompletedTopic, message);
         } catch (MqttException e) {
             throw new RuntimeException("Cannot publish chunk to MQTT", e);
         } catch (IOException e) {
@@ -130,7 +137,7 @@ public class FileServiceImpl implements FileService {
         }
     }
 
-    private void finalizeFile(Path tempFilePath, FileMetadata metadata) throws IOException {
+    private void finalizeFile(Path tempFilePath, FileMetadata metadata, MqttEnvelope<?> envelope) throws IOException {
         Path finalFilePath = tempFilePath.getParent().resolve(metadata.getFileName());
 
         MessageDigest digest;
@@ -173,7 +180,7 @@ public class FileServiceImpl implements FileService {
                 StandardCopyOption.ATOMIC_MOVE
         );
 
-        this.sendEventFileCompleted(metadata, metadata.getSourceService());
+        this.sendEventFileCompleted(metadata, envelope.getSourceService());
 
         log.info("Received successfully new file: {}", finalFilePath);
     }

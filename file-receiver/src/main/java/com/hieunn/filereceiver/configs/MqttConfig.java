@@ -1,6 +1,6 @@
 package com.hieunn.filereceiver.configs;
 
-import com.hieunn.filereceiver.events.MqttConnectedEvent;
+import com.hieunn.commonlib.events.MqttConnectedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.*;

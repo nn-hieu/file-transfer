@@ -10,9 +10,10 @@ mqtt:
       meta-data: file-transfer/meta-data
       chunk: file-transfer/chunk
       transfer-completed: file-transfer/completed
+      resend-file: file-transfer/resend-file
 
 server:
   port: 8081
 
 app:
-  folder-name: received_files
+  folder-name: file-receiver/received_files

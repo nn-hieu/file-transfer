@@ -1,4 +1,4 @@
-package com.hieunn.filesender.dtos;
+package com.hieunn.commonlib.dtos;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -17,5 +17,4 @@ public class FileMetadata {
     private int totalChunks;
     private String contentType;
     private String checksum;
-    private String sourceService;
 }

@@ -1,8 +1,9 @@
 package com.hieunn.filesender.subscribers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hieunn.filesender.events.MqttConnectedEvent;
+import com.hieunn.commonlib.events.MqttConnectedEvent;
 import com.hieunn.filesender.listners.FileTransferCompletedListener;
+import com.hieunn.filesender.listners.ResendFileListener;
 import com.hieunn.filesender.services.FileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,10 +18,13 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class MqttSubscriber {
     @Value("${spring.application.name}")
-    private String serverName;
+    private String serviceName;
 
     @Value("${mqtt.topic.file.transfer-completed}")
     private String fileTransferCompletedTopic;
+
+    @Value("${mqtt.topic.file.resend-file}")
+    private String resendFileTopic;
 
     private final MqttClient mqttClient;
     private final ObjectMapper objectMapper;
@@ -41,9 +45,15 @@ public class MqttSubscriber {
         if (!this.mqttClient.isConnected()) return;
 
         mqttClient.subscribe(
-                fileTransferCompletedTopic + "/" + serverName,
+                fileTransferCompletedTopic,
                 1,
-                new FileTransferCompletedListener(objectMapper, fileService)
+                new FileTransferCompletedListener(objectMapper, fileService, serviceName)
+        );
+
+        mqttClient.subscribe(
+                resendFileTopic,
+                1,
+                new ResendFileListener(objectMapper, fileService, serviceName)
         );
 
         log.info("MQTT topics subscribed successfully");

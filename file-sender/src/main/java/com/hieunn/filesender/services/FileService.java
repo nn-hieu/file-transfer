@@ -1,7 +1,8 @@
 package com.hieunn.filesender.services;
 
-import com.hieunn.filesender.dtos.ChunkFile;
-import com.hieunn.filesender.dtos.FileMetadata;
+import com.hieunn.commonlib.dtos.ChunkFile;
+import com.hieunn.commonlib.dtos.FileMetadata;
+import com.hieunn.commonlib.dtos.MqttEnvelope;
 import org.springframework.web.multipart.MultipartFile;
 
 public interface FileService {
@@ -13,5 +14,7 @@ public interface FileService {
 
     void resendSpecificChunk(FileMetadata metadata, int index, String targetService);
 
-    void handleFileCompleted(FileMetadata fileMetadata);
+    void resendFile(FileMetadata metadata, String targetService);
+
+    void handleFileCompleted(MqttEnvelope<FileMetadata> envelope);
 }

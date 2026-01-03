@@ -1,9 +1,10 @@
 package com.hieunn.filesender.services.impls;
 
-import com.hieunn.filesender.dtos.ChunkFile;
-import com.hieunn.filesender.dtos.FileMetadata;
+import com.hieunn.commonlib.dtos.ChunkFile;
+import com.hieunn.commonlib.dtos.FileMetadata;
+import com.hieunn.commonlib.dtos.MqttEnvelope;
+import com.hieunn.commonlib.utils.ObjectUtils;
 import com.hieunn.filesender.services.FileService;
-import com.hieunn.filesender.utils.ObjectUtils;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -105,7 +106,6 @@ public class FileServiceImpl implements FileService {
         metaData.setFileName(file.getOriginalFilename());
         metaData.setContentType(file.getContentType());
         metaData.setChunkSizeInBytes(chunkSize.toBytes());
-        metaData.setSourceService(serviceName);
 
         long fileSize = file.getSize();
         metaData.setFileSize(fileSize);
@@ -147,13 +147,15 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
-    public void sendFileMetadata(FileMetadata fileMetadata, String targetService) {
+    public void sendFileMetadata(FileMetadata metadata, String targetService) {
         try {
+            MqttEnvelope<FileMetadata> envelope = new MqttEnvelope<>(serviceName, targetService, metadata);
+
             MqttMessage message = new MqttMessage();
-            message.setPayload(objectUtils.convertObjectToBytes(fileMetadata));
+            message.setPayload(objectUtils.convertObjectToBytes(envelope));
             message.setQos(1);
 
-            mqttClient.publish(fileMetaTopic + "/" + targetService, message);
+            mqttClient.publish(fileMetaTopic, message);
         } catch (IOException e) {
             throw new RuntimeException("Cannot convert file meta data to bytes", e);
         } catch (MqttException e) {
@@ -164,14 +166,13 @@ public class FileServiceImpl implements FileService {
     @Override
     public void sendChunkFile(ChunkFile chunkFile, String targetService) {
         try {
+            MqttEnvelope<ChunkFile> envelope = new MqttEnvelope<>(serviceName, targetService, chunkFile);
+
             MqttMessage message = new MqttMessage();
-            message.setPayload(objectUtils.convertObjectToBytes(chunkFile));
+            message.setPayload(objectUtils.convertObjectToBytes(envelope));
             message.setQos(1);
 
-            mqttClient.publish(
-                    chunkFileTopic + "/" + targetService,
-                    message
-            );
+            mqttClient.publish(chunkFileTopic, message);
         } catch (MqttException e) {
             throw new RuntimeException("Cannot publish chunk to MQTT", e);
         } catch (IOException e) {
@@ -210,13 +211,57 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
-    public void handleFileCompleted(FileMetadata fileMetadata) {
+    public void resendFile(FileMetadata metadata, String targetService) {
+        log.info("Resending file: fileId={}", metadata.getFileId());
+
+        Path tempFilePath = Paths.get(folderName, metadata.getFileId() + ".tmp");
+        if (Files.notExists(tempFilePath)) {
+            log.error(
+                    "Cannot resend file. Temp file not found: fileId={}, fileName={}",
+                    metadata.getFileId(), metadata.getFileName()
+            );
+            return;
+        }
+
+        try {
+            this.sendFileMetadata(metadata, targetService);
+
+            try (RandomAccessFile raf = new RandomAccessFile(tempFilePath.toFile(), "r")) {
+                int chunkSizeInBytes = (int) chunkSize.toBytes();
+                long fileSize = Files.size(tempFilePath);
+
+                ChunkFile chunkFile = new ChunkFile();
+                chunkFile.setFileId(metadata.getFileId());
+
+                for (int i = 0; i < metadata.getTotalChunks(); i++) {
+                    byte[] data = this.readChunkData(raf, i, chunkSizeInBytes, fileSize);
+                    chunkFile.setIndex(i);
+                    chunkFile.setData(data);
+
+                    this.sendChunkFile(chunkFile, targetService);
+                }
+            }
+
+            log.info(
+                    "Resend file successfully: fileId={}, fileName={}",
+                    metadata.getFileId(),
+                    metadata.getFileName()
+            );
+        } catch (IOException e) {
+            log.error("Error while resending file: fileId={}", metadata.getFileId());
+        }
+    }
+
+    @Override
+    public void handleFileCompleted(MqttEnvelope<FileMetadata> envelope) {
+        FileMetadata fileMetadata = envelope.getPayload();
+
         Path tempFilePath = Paths.get(folderName, fileMetadata.getFileId() + ".tmp");
 
         try {
             Files.deleteIfExists(tempFilePath);
         } catch (IOException e) {
-            throw new RuntimeException("Cannot delete temp file", e);
+            log.error("Cannot delete temp file: {}", tempFilePath);
         }
     }
 }

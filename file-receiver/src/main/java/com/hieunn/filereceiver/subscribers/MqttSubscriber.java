@@ -1,7 +1,7 @@
 package com.hieunn.filereceiver.subscribers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hieunn.filereceiver.events.MqttConnectedEvent;
+import com.hieunn.commonlib.events.MqttConnectedEvent;
 import com.hieunn.filereceiver.listeners.FileChunkListener;
 import com.hieunn.filereceiver.listeners.FileMetaListener;
 import com.hieunn.filereceiver.services.FileService;
@@ -24,7 +24,7 @@ public class MqttSubscriber {
     private String fileChunkTopic;
 
     @Value("${spring.application.name}")
-    private String serverName;
+    private String serviceName;
 
     private final MqttClient mqttClient;
     private final ObjectMapper objectMapper;
@@ -45,15 +45,15 @@ public class MqttSubscriber {
         if (!this.mqttClient.isConnected()) return;
 
         mqttClient.subscribe(
-                fileMetaTopic + "/" + serverName,
+                fileMetaTopic,
                 1,
-                new FileMetaListener(objectMapper, fileService)
+                new FileMetaListener(objectMapper, fileService, serviceName)
         );
 
         mqttClient.subscribe(
-                fileChunkTopic + "/" + serverName,
+                fileChunkTopic,
                 1,
-                new FileChunkListener(objectMapper, fileService)
+                new FileChunkListener(objectMapper, fileService, serviceName)
         );
 
         log.info("MQTT topics subscribed successfully");

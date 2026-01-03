@@ -1,10 +1,11 @@
 package com.hieunn.filereceiver.services;
 
-import com.hieunn.filereceiver.dtos.ChunkFile;
-import com.hieunn.filereceiver.dtos.FileMetadata;
+import com.hieunn.commonlib.dtos.ChunkFile;
+import com.hieunn.commonlib.dtos.FileMetadata;
+import com.hieunn.commonlib.dtos.MqttEnvelope;
 
 public interface FileService {
-    void handleFileMetadata(FileMetadata fileMetadata);
+    void handleFileMetadata(MqttEnvelope<FileMetadata> envelope);
 
-    void handleChunkFile(ChunkFile chunkFile);
+    void handleChunkFile(MqttEnvelope<ChunkFile> envelope);
 }

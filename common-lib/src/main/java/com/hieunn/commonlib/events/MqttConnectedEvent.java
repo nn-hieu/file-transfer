@@ -1,4 +1,4 @@
-package com.hieunn.filereceiver.events;
+package com.hieunn.commonlib.events;
 
 import lombok.Getter;
 import lombok.Setter;
