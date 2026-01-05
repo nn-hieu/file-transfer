@@ -3,6 +3,7 @@ package com.hieunn.filereceiver.services.impls;
 import com.hieunn.commonlib.dtos.ChunkFile;
 import com.hieunn.commonlib.dtos.FileMetadata;
 import com.hieunn.commonlib.dtos.MqttEnvelope;
+import com.hieunn.commonlib.dtos.ResendChunkRequest;
 import com.hieunn.commonlib.utils.ObjectUtils;
 import com.hieunn.filereceiver.dtos.FileChunkState;
 import com.hieunn.filereceiver.enums.CacheName;
@@ -45,6 +46,9 @@ public class FileServiceImpl implements FileService {
 
     @Value("${mqtt.topic.file.resend-file}")
     private String fileResendTopic;
+
+    @Value("${mqtt.topic.file.resend-chunk}")
+    private String chunkResendTopic;
 
     @Value("${app.folder-name}")
     private String folderName;
@@ -111,11 +115,14 @@ public class FileServiceImpl implements FileService {
             FileChunkState state = chunkStateCache.get(chunkFile.getFileId(), FileChunkState.class);
             if (state == null) {
                 state = new FileChunkState(metadata.getTotalChunks());
+                state.setSourceService(envelope.getSourceService());
+                state.setTargetService(envelope.getTargetService());
                 chunkStateCache.put(chunkFile.getFileId(), state);
             }
 
             // Mark chunk already received
             state.getReceivedChunks().add(chunkFile.getIndex());
+            chunkStateCache.put(chunkFile.getFileId(), state);
 
             if (state.getReceivedChunks().size() == metadata.getTotalChunks()
                     && state.getMerged().compareAndSet(false, true)
@@ -125,6 +132,33 @@ public class FileServiceImpl implements FileService {
             }
         } catch (IOException e) {
             throw new RuntimeException("Cannot process chunk file", e);
+        }
+    }
+
+    @Override
+    public void sendEventResendChunk(FileMetadata metadata, int[] indexes, String targetService) {
+        log.info(
+                "Sending event resend chunk...: indexes={}, fileId={}, fileName={}",
+                indexes, metadata.getFileId(), metadata.getFileName()
+        );
+        try {
+            ResendChunkRequest request = new ResendChunkRequest(metadata, indexes);
+            MqttEnvelope<ResendChunkRequest> envelope = new MqttEnvelope<>(serviceName, targetService, request);
+
+            MqttMessage message = new MqttMessage();
+            message.setPayload(objectUtils.convertObjectToBytes(envelope));
+            message.setQos(1);
+
+            mqttClient.publish(chunkResendTopic, message);
+
+            log.info(
+                    "Sent event resend chunk successfully: indexes={}, fileId={}, fileName={}",
+                    indexes, metadata.getFileId(), metadata.getFileName()
+            );
+        } catch (MqttException e) {
+            throw new RuntimeException("Cannot publish chunk to MQTT", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot convert data to bytes", e);
         }
     }
 
@@ -143,7 +177,7 @@ public class FileServiceImpl implements FileService {
         } catch (MqttException e) {
             throw new RuntimeException("Cannot publish chunk to MQTT", e);
         } catch (IOException e) {
-            throw new RuntimeException("Cannot convert chunk file to bytes", e);
+            throw new RuntimeException("Cannot convert data to bytes", e);
         }
     }
 
@@ -228,7 +262,7 @@ public class FileServiceImpl implements FileService {
 
             mqttClient.publish(fileResendTopic, message);
         } catch (IOException e) {
-            throw new RuntimeException("Cannot convert object to bytes", e);
+            throw new RuntimeException("Cannot convert data to bytes", e);
         } catch (MqttException e) {
             throw new RuntimeException("Cannot publish message to MQTT", e);
         }

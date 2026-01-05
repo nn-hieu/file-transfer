@@ -8,4 +8,6 @@ public interface FileService {
     void handleFileMetadata(MqttEnvelope<FileMetadata> envelope);
 
     void handleChunkFile(MqttEnvelope<ChunkFile> envelope);
+
+    void sendEventResendChunk(FileMetadata metadata, int[] indexes, String targetService);
 }

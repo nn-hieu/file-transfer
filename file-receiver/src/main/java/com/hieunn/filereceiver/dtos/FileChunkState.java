@@ -17,6 +17,8 @@ public class FileChunkState {
     private int totalChunks;
     private Set<Integer> receivedChunks = ConcurrentHashMap.newKeySet();
     private AtomicBoolean merged = new AtomicBoolean(false);
+    private String sourceService;
+    private String targetService;
 
     public FileChunkState(int totalChunks) {
         this.totalChunks = totalChunks;

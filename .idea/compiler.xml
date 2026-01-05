@@ -19,7 +19,6 @@
           <entry name="$MAVEN_REPOSITORY$/org/mapstruct/mapstruct-processor/${mapstruct.version}/mapstruct-processor-${mapstruct.version}.jar" />
         </processorPath>
         <module name="file-receiver" />
-        <module name="file-sender" />
       </profile>
       <profile name="Annotation profile for common-lib" enabled="true">
         <sourceOutputDir name="target/generated-sources/annotations" />
@@ -30,6 +29,16 @@
           <entry name="$MAVEN_REPOSITORY$/org/mapstruct/mapstruct-processor/${mapstruct.version}/mapstruct-processor-${mapstruct.version}.jar" />
         </processorPath>
         <module name="common-lib" />
+      </profile>
+      <profile name="Annotation profile for file-sender" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <processorPath useClasspath="false">
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.30/lombok-1.18.30.jar" />
+          <entry name="$MAVEN_REPOSITORY$/org/mapstruct/mapstruct-processor/${mapstruct.version}/mapstruct-processor-${mapstruct.version}.jar" />
+        </processorPath>
+        <module name="file-sender" />
       </profile>
     </annotationProcessing>
   </component>

@@ -15,6 +15,7 @@ mqtt:
       chunk: file-transfer/chunk
       transfer-completed: file-transfer/completed
       resend-file: file-transfer/resend-file
+      resend-chunk: file-transfer/resend-chunk
 
 server:
   port: 8082

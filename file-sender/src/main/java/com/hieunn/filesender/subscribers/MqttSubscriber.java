@@ -3,6 +3,7 @@ package com.hieunn.filesender.subscribers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hieunn.commonlib.events.MqttConnectedEvent;
 import com.hieunn.filesender.listeners.FileTransferCompletedListener;
+import com.hieunn.filesender.listeners.ResendChunkListener;
 import com.hieunn.filesender.listeners.ResendFileListener;
 import com.hieunn.filesender.services.FileService;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,9 @@ public class MqttSubscriber {
 
     @Value("${mqtt.topic.file.resend-file}")
     private String resendFileTopic;
+
+    @Value("${mqtt.topic.file.resend-chunk}")
+    private String resendChunkTopic;
 
     private final MqttClient mqttClient;
     private final ObjectMapper objectMapper;
@@ -54,6 +58,12 @@ public class MqttSubscriber {
                 resendFileTopic,
                 1,
                 new ResendFileListener(objectMapper, fileService, serviceName)
+        );
+
+        mqttClient.subscribe(
+                resendChunkTopic,
+                1,
+                new ResendChunkListener(objectMapper, fileService, serviceName)
         );
 
         log.info("MQTT topics subscribed successfully");

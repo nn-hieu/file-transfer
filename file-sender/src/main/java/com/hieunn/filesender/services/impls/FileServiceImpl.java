@@ -162,6 +162,8 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void sendFileMetadata(FileMetadata metadata, String targetService) {
+        log.info("Sending file metadata...: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
+
         try {
             MqttEnvelope<FileMetadata> envelope = new MqttEnvelope<>(serviceName, targetService, metadata);
 
@@ -170,6 +172,8 @@ public class FileServiceImpl implements FileService {
             message.setQos(1);
 
             mqttClient.publish(fileMetaTopic, message);
+
+            log.info("Sent file metadata successfully: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
         } catch (IOException e) {
             throw new RuntimeException("Cannot convert file meta data to bytes", e);
         } catch (MqttException e) {
@@ -179,6 +183,7 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void sendChunkFile(ChunkFile chunkFile, String targetService) {
+        log.info("Sending chunk {}...: fileId={}", chunkFile.getIndex(), chunkFile.getFileId());
         try {
             MqttEnvelope<ChunkFile> envelope = new MqttEnvelope<>(serviceName, targetService, chunkFile);
 
@@ -187,6 +192,8 @@ public class FileServiceImpl implements FileService {
             message.setQos(1);
 
             mqttClient.publish(chunkFileTopic, message);
+
+            log.info("Sent chunk {} successfully: fileId={}", chunkFile.getIndex(), chunkFile.getFileId());
         } catch (MqttException e) {
             throw new RuntimeException("Cannot publish chunk to MQTT", e);
         } catch (IOException e) {
@@ -196,6 +203,11 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void resendSpecificChunk(FileMetadata metadata, int index, String targetService) {
+        log.info(
+                "Resending chunk {}...: fileId={}, fileName={}",
+                index, metadata.getFileId(), metadata.getFileName()
+        );
+
         Path filePath = Paths.get(folderName, metadata.getFileId() + ".tmp");
         if (Files.notExists(filePath)) {
             log.error("File cache not found for fileId: {}", metadata.getFileId());
@@ -213,12 +225,7 @@ public class FileServiceImpl implements FileService {
             chunkFile.setIndex(index);
             chunkFile.setData(data);
 
-            log.info(
-                    "Resending chunk {} for file: fileId={}, fileName={}",
-                    index, metadata.getFileId(), metadata.getFileName()
-            );
             this.sendChunkFile(chunkFile, targetService);
-
         } catch (IOException e) {
             throw new RuntimeException("Cannot resend chunk file", e);
         }
