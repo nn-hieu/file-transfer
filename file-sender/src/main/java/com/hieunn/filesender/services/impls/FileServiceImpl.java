@@ -57,7 +57,7 @@ public class FileServiceImpl implements FileService {
     private String serviceName;
 
     @Value("${file.max-resend-times}")
-    private int maxResendTimes;
+    private int maxResendFileTimes;
 
     @PostConstruct
     protected void createFolderForStoringFiles() {
@@ -90,6 +90,7 @@ public class FileServiceImpl implements FileService {
                 ChunkFile chunkFile = new ChunkFile();
                 chunkFile.setFileId(fileId);
                 for (int i = 0; i < metaData.getTotalChunks(); ++i) {
+//                    if (i == 1 || i == 3) continue;
                     byte[] data = this.readChunkData(raf, i, chunkSizeInBytes, metaData.getFileSize());
                     chunkFile.setIndex(i);
                     chunkFile.setData(data);
@@ -203,6 +204,7 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void resendSpecificChunk(FileMetadata metadata, int index, String targetService) {
+//        if (index == 3) return;
         log.info(
                 "Resending chunk {}...: fileId={}, fileName={}",
                 index, metadata.getFileId(), metadata.getFileName()
@@ -237,7 +239,7 @@ public class FileServiceImpl implements FileService {
 
         Cache fileStateCache = cacheManager.getCache(CacheName.FILE_STATE.getValue());
         FileState fileState = fileStateCache.get(metadata.getFileId(), FileState.class);
-        if (fileState.getRetryTimes() >= maxResendTimes) {
+        if (fileState.getRetryTimes() >= maxResendFileTimes) {
             this.cleanupCache(metadata.getFileId());
 
             log.error("Reach max resend times");

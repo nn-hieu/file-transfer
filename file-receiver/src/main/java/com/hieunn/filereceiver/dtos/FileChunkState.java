@@ -19,6 +19,7 @@ public class FileChunkState {
     private AtomicBoolean merged = new AtomicBoolean(false);
     private String sourceService;
     private String targetService;
+    private int retryTimes = 0;
 
     public FileChunkState(int totalChunks) {
         this.totalChunks = totalChunks;

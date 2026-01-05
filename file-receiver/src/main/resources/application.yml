@@ -18,3 +18,7 @@ server:
 
 app:
   folder-name: file-receiver/received_files
+
+file:
+  chunk:
+    max-resend-times: 1

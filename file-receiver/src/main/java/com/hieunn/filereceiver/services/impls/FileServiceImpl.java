@@ -14,7 +14,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
-import org.eclipse.paho.client.mqttv3.MqttPersistenceException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -24,10 +23,8 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -55,6 +52,9 @@ public class FileServiceImpl implements FileService {
 
     @Value("${spring.application.name}")
     private String serviceName;
+
+    @Value("${file.chunk.max-resend-times}")
+    private int maxResendChunkTimes;
 
     @PostConstruct
     protected void createFolderForStoringFiles() {
@@ -142,6 +142,15 @@ public class FileServiceImpl implements FileService {
                 indexes, metadata.getFileId(), metadata.getFileName()
         );
         try {
+            Cache chunkStateCache = cacheManager.getCache(CacheName.FILE_CHUNK_STATE.getValue());
+            FileChunkState chunkState = chunkStateCache.get(metadata.getFileId(), FileChunkState.class);
+            if (chunkState.getRetryTimes() >= maxResendChunkTimes) {
+                log.error("Reach max resend chunk times");
+                this.cleanupCache(metadata.getFileId());
+                this.cleanupFolder(metadata.getFileId());
+                return;
+            }
+
             ResendChunkRequest request = new ResendChunkRequest(metadata, indexes);
             MqttEnvelope<ResendChunkRequest> envelope = new MqttEnvelope<>(serviceName, targetService, request);
 
@@ -150,6 +159,9 @@ public class FileServiceImpl implements FileService {
             message.setQos(1);
 
             mqttClient.publish(chunkResendTopic, message);
+
+            chunkState.setRetryTimes(chunkState.getRetryTimes() + 1);
+            chunkStateCache.put(metadata.getFileId(), chunkState);
 
             log.info(
                     "Sent event resend chunk successfully: indexes={}, fileId={}, fileName={}",
@@ -233,9 +245,24 @@ public class FileServiceImpl implements FileService {
         log.info("Received successfully new file: {}", finalFilePath);
     }
 
-    private void cleanupFolder(String fileId) throws IOException {
+    public void cleanupFolder(String fileId) throws IOException {
         Path fileDir = Paths.get(folderName, fileId);
-        Files.deleteIfExists(fileDir);
+
+        if (Files.exists(fileDir) && Files.isDirectory(fileDir)) {
+            Files.walkFileTree(fileDir, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    Files.delete(dir);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
     }
 
     private void cleanupCache(String fileId) {
