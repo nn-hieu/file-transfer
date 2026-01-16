@@ -24,14 +24,23 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 @Service
 @RequiredArgsConstructor
@@ -59,6 +68,9 @@ public class FileServiceImpl implements FileService {
     @Value("${file.max-resend-times}")
     private int maxResendFileTimes;
 
+    @Value("${app.max-allowed-virtual-threads}")
+    private int maxAllowedVirtualThreads;
+
     @PostConstruct
     protected void createFolderForStoringFiles() {
         try {
@@ -78,24 +90,54 @@ public class FileServiceImpl implements FileService {
 
         log.info("Sending file...: fileId={}, fileName={}", fileId, file.getOriginalFilename());
 
+        Semaphore semaphore = new Semaphore(maxAllowedVirtualThreads);
         try {
             file.transferTo(tempFilePath);
 
             FileMetadata metaData = this.buildFileMetadata(file, fileId, tempFilePath);
             this.sendFileMetadata(metaData, targetService);
 
-            try (RandomAccessFile raf = new RandomAccessFile(tempFilePath.toFile(), "r")) {
-                int chunkSizeInBytes = (int) chunkSize.toBytes();
+            int chunkSizeInBytes = (int) chunkSize.toBytes();
+            int totalChunks = metaData.getTotalChunks();
 
-                ChunkFile chunkFile = new ChunkFile();
-                chunkFile.setFileId(fileId);
-                for (int i = 0; i < metaData.getTotalChunks(); ++i) {
-//                    if (i == 1 || i == 3) continue;
-                    byte[] data = this.readChunkData(raf, i, chunkSizeInBytes, metaData.getFileSize());
-                    chunkFile.setIndex(i);
-                    chunkFile.setData(data);
+            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                List<Future<?>> futures = new ArrayList<>();
+                for (int i = 0; i < totalChunks; ++i) {
+                    final int chunkIndex = i;
+                    futures.add(executor.submit(() -> {
+                        try {
+                            semaphore.acquire();
+                            try (
+                                    FileChannel fileChannel =
+                                            FileChannel.open(tempFilePath, StandardOpenOption.READ)
+                            ) {
+                                long offset = (long) chunkIndex * chunkSizeInBytes;
+                                long remainingSize = metaData.getFileSize() - offset;
+                                int currentChunkSize =
+                                        (int) Math.min(chunkSizeInBytes, remainingSize);
 
-                    this.sendChunkFile(chunkFile, targetService);
+                                ByteBuffer buffer = ByteBuffer.allocate(currentChunkSize);
+                                while (buffer.hasRemaining()) {
+                                    fileChannel.read(buffer, offset + buffer.position());
+                                }
+
+                                ChunkFile chunkFile = new ChunkFile();
+                                chunkFile.setFileId(fileId);
+                                chunkFile.setIndex(chunkIndex);
+                                chunkFile.setData(buffer.array());
+
+                                this.sendChunkFile(chunkFile, targetService);
+                            }
+                        } catch (Exception e) {
+                            log.error("Error sending chunk {}", chunkIndex, e);
+                        } finally {
+                            semaphore.release();
+                        }
+                    }));
+                }
+
+                for (Future<?> f : futures) {
+                    f.get();
                 }
             }
 
@@ -104,13 +146,15 @@ public class FileServiceImpl implements FileService {
             fileStateCache.put(fileId, fileState);
 
             log.info("Sent file successfully: fileId={}, fileName={}", fileId, metaData.getFileName());
-        } catch (IOException | NoSuchAlgorithmException e) {
+
+        } catch (Exception e) {
             log.error("Error processing file send", e);
             try {
                 Files.deleteIfExists(tempFilePath);
             } catch (IOException ex) {
                 log.error("Error deleting temp file", ex);
             }
+            throw new RuntimeException(e);
         }
     }
 
@@ -204,7 +248,6 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void resendSpecificChunk(FileMetadata metadata, int index, String targetService) {
-//        if (index == 3) return;
         log.info(
                 "Resending chunk {}...: fileId={}, fileName={}",
                 index, metadata.getFileId(), metadata.getFileName()

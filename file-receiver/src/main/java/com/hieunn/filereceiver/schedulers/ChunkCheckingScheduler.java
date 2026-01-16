@@ -20,7 +20,7 @@ public class ChunkCheckingScheduler {
     private final CacheManager cacheManager;
     private final FileService fileService;
 
-    @Scheduled(cron = "0 */1 * * * *")
+    @Scheduled(cron = "0 */3 * * * *")
     public void checkMissingChunks() {
         Cache chunkStateCache = cacheManager.getCache(CacheName.FILE_CHUNK_STATE.getValue());
         Cache metadataCache = cacheManager.getCache(CacheName.FILE_META_DATA.getValue());

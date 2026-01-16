@@ -26,3 +26,4 @@ file:
 
 app:
   folder-name: file-sender/sent_files
+  max-allowed-virtual-threads: 100
