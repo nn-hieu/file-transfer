@@ -73,8 +73,6 @@ public class FileServiceImpl implements FileService {
     public void handleFileMetadata(MqttEnvelope<FileMetadata> envelope) {
         FileMetadata metadata = envelope.getPayload();
 
-        log.info("Received file metadata: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
-
         Cache cache = cacheManager.getCache(CacheName.FILE_META_DATA.getValue());
         assert cache != null;
         cache.put(metadata.getFileId(), metadata);
@@ -83,8 +81,6 @@ public class FileServiceImpl implements FileService {
     @Override
     public void handleChunkFile(MqttEnvelope<ChunkFile> envelope) {
         ChunkFile chunkFile = envelope.getPayload();
-
-        log.info("Received chunk file: index={}, fileId={}", chunkFile.getIndex(), chunkFile.getFileId());
 
         try {
             // Get metadata from cache
@@ -240,9 +236,9 @@ public class FileServiceImpl implements FileService {
                 StandardCopyOption.ATOMIC_MOVE
         );
 
-        this.sendEventFileCompleted(metadata, envelope.getSourceService());
+        log.info("Merged new file successfully: path={}", finalFilePath);
 
-        log.info("Received successfully new file: {}", finalFilePath);
+        this.sendEventFileCompleted(metadata, envelope.getSourceService());
     }
 
     public void cleanupFolder(String fileId) throws IOException {

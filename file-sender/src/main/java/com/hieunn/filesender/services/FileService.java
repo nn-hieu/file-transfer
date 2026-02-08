@@ -14,6 +14,8 @@ public interface FileService {
 
     void resendSpecificChunk(FileMetadata metadata, int index, String targetService);
 
+    void resendChunks(FileMetadata metadata, int[] indexes, String targetService);
+
     void resendFile(FileMetadata metadata, String targetService);
 
     void handleFileCompleted(MqttEnvelope<FileMetadata> envelope);

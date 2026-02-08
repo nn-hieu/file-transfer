@@ -6,10 +6,12 @@ import com.hieunn.commonlib.dtos.MqttEnvelope;
 import com.hieunn.commonlib.dtos.ResendChunkRequest;
 import com.hieunn.filesender.services.FileService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 
 @RequiredArgsConstructor
+@Slf4j
 public class ResendChunkListener implements IMqttMessageListener {
     private final ObjectMapper objectMapper;
     private final FileService fileService;
@@ -24,10 +26,13 @@ public class ResendChunkListener implements IMqttMessageListener {
             return;
         }
 
+        log.info(
+                "Received resend chunk event: fileId={}, fileName={}, indexes={}, sourceService={}",
+                envelope.getPayload().getMetadata().getFileId(), envelope.getPayload().getMetadata().getFileName(), envelope.getPayload().getIndexes(), envelope.getSourceService()
+        );
+
         ResendChunkRequest request = envelope.getPayload();
 
-        for (int i : request.getIndexes()) {
-            fileService.resendSpecificChunk(request.getMetadata(), i, envelope.getSourceService());
-        }
+        fileService.resendChunks(request.getMetadata(), request.getIndexes(), envelope.getSourceService());
     }
 }

@@ -33,10 +33,7 @@ import java.nio.file.StandardOpenOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -88,7 +85,10 @@ public class FileServiceImpl implements FileService {
         String fileId = UUID.randomUUID().toString();
         Path tempFilePath = Paths.get(folderName, fileId + ".tmp");
 
-        log.info("Sending file...: fileId={}, fileName={}", fileId, file.getOriginalFilename());
+        log.info(
+                "Sending file...: fileId={}, fileName={}, targetService={}",
+                fileId, file.getOriginalFilename(), targetService
+        );
 
         Semaphore semaphore = new Semaphore(maxAllowedVirtualThreads);
         try {
@@ -103,6 +103,7 @@ public class FileServiceImpl implements FileService {
             try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 List<Future<?>> futures = new ArrayList<>();
                 for (int i = 0; i < totalChunks; ++i) {
+                    if (i == 1 || i == 3 || i == 5) continue;
                     final int chunkIndex = i;
                     futures.add(executor.submit(() -> {
                         try {
@@ -145,8 +146,10 @@ public class FileServiceImpl implements FileService {
             Cache fileStateCache = cacheManager.getCache(CacheName.FILE_STATE.getValue());
             fileStateCache.put(fileId, fileState);
 
-            log.info("Sent file successfully: fileId={}, fileName={}", fileId, metaData.getFileName());
-
+            log.info(
+                    "Sent file successfully: fileId={}, fileName={}, targetService={}",
+                    fileId, metaData.getFileName(), targetService
+            );
         } catch (Exception e) {
             log.error("Error processing file send", e);
             try {
@@ -154,7 +157,6 @@ public class FileServiceImpl implements FileService {
             } catch (IOException ex) {
                 log.error("Error deleting temp file", ex);
             }
-            throw new RuntimeException(e);
         }
     }
 
@@ -207,7 +209,10 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void sendFileMetadata(FileMetadata metadata, String targetService) {
-        log.info("Sending file metadata...: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
+        log.info(
+                "Sending file metadata...: fileId={}, fileName={}, targetService={}",
+                metadata.getFileId(), metadata.getFileName(), targetService
+        );
 
         try {
             MqttEnvelope<FileMetadata> envelope = new MqttEnvelope<>(serviceName, targetService, metadata);
@@ -218,7 +223,10 @@ public class FileServiceImpl implements FileService {
 
             mqttClient.publish(fileMetaTopic, message);
 
-            log.info("Sent file metadata successfully: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
+            log.info(
+                    "Sent file metadata successfully: fileId={}, fileName={}, targetService={}",
+                    metadata.getFileId(), metadata.getFileName(), targetService
+            );
         } catch (IOException e) {
             throw new RuntimeException("Cannot convert file meta data to bytes", e);
         } catch (MqttException e) {
@@ -228,7 +236,10 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void sendChunkFile(ChunkFile chunkFile, String targetService) {
-        log.info("Sending chunk {}...: fileId={}", chunkFile.getIndex(), chunkFile.getFileId());
+        log.info(
+                "Sending chunk {}...: fileId={}, targetService={}",
+                chunkFile.getIndex(), chunkFile.getFileId(), targetService
+        );
         try {
             MqttEnvelope<ChunkFile> envelope = new MqttEnvelope<>(serviceName, targetService, chunkFile);
 
@@ -238,7 +249,10 @@ public class FileServiceImpl implements FileService {
 
             mqttClient.publish(chunkFileTopic, message);
 
-            log.info("Sent chunk {} successfully: fileId={}", chunkFile.getIndex(), chunkFile.getFileId());
+            log.info(
+                    "Sent chunk {} successfully: fileId={}, targetService={}",
+                    chunkFile.getIndex(), chunkFile.getFileId(), targetService
+            );
         } catch (MqttException e) {
             throw new RuntimeException("Cannot publish chunk to MQTT", e);
         } catch (IOException e) {
@@ -248,14 +262,9 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public void resendSpecificChunk(FileMetadata metadata, int index, String targetService) {
-        log.info(
-                "Resending chunk {}...: fileId={}, fileName={}",
-                index, metadata.getFileId(), metadata.getFileName()
-        );
-
         Path filePath = Paths.get(folderName, metadata.getFileId() + ".tmp");
         if (Files.notExists(filePath)) {
-            log.error("File cache not found for fileId: {}", metadata.getFileId());
+            log.error("File cache not found: fileId={}", metadata.getFileId());
             return;
         }
 
@@ -277,8 +286,50 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
+    public void resendChunks(FileMetadata metadata, int[] indexes, String targetService) {
+        Semaphore semaphore = new Semaphore(maxAllowedVirtualThreads);
+        List<Future<?>> futures = new ArrayList<>();
+
+        Path filePath = Paths.get(folderName, metadata.getFileId() + ".tmp");
+        if (Files.notExists(filePath)) {
+            log.error("File cache not found: fileId={}", metadata.getFileId());
+            return;
+        }
+
+        indexes = Arrays.stream(indexes).distinct().toArray();
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (Integer index : indexes) {
+                int totalChunks = metadata.getTotalChunks();
+                if (index < 0 || index >= totalChunks) {
+                    log.warn("Invalid chunk: index={}, fileId={}", index, metadata.getFileId());
+                    continue;
+                }
+                futures.add(executor.submit(() -> {
+                    try {
+                        semaphore.acquire();
+                        this.resendSpecificChunk(metadata, index, targetService);
+                    } catch (Exception e) {
+                        log.error("Failed to resend chunk {}", index, e);
+                    } finally {
+                        semaphore.release();
+                    }
+                }));
+            }
+
+            for (Future<?> f : futures) {
+                f.get();
+            }
+        } catch (Exception e) {
+            log.error("Resent chunks failed: fileId={}", metadata.getFileId(), e);
+        }
+    }
+
+    @Override
     public void resendFile(FileMetadata metadata, String targetService) {
-        log.info("Resending file...: fileId={}, fileName={}", metadata.getFileId(), metadata.getFileName());
+        log.info(
+                "Resending file...: fileId={}, fileName={}, targetService={}",
+                metadata.getFileId(), metadata.getFileName(), targetService
+        );
 
         Cache fileStateCache = cacheManager.getCache(CacheName.FILE_STATE.getValue());
         FileState fileState = fileStateCache.get(metadata.getFileId(), FileState.class);
@@ -321,9 +372,8 @@ public class FileServiceImpl implements FileService {
             fileStateCache.put(metadata.getFileId(), fileState);
 
             log.info(
-                    "Resent file successfully: fileId={}, fileName={}",
-                    metadata.getFileId(),
-                    metadata.getFileName()
+                    "Resent file successfully: fileId={}, fileName={}, targetService={}",
+                    metadata.getFileId(), metadata.getFileName(), targetService
             );
         } catch (IOException e) {
             log.error("Error while resending file: fileId={}", metadata.getFileId());

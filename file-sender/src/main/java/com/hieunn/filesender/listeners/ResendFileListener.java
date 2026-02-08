@@ -6,10 +6,12 @@ import com.hieunn.commonlib.dtos.FileMetadata;
 import com.hieunn.commonlib.dtos.MqttEnvelope;
 import com.hieunn.filesender.services.FileService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 
 @RequiredArgsConstructor
+@Slf4j
 public class ResendFileListener implements IMqttMessageListener {
     private final ObjectMapper objectMapper;
     private final FileService fileService;
@@ -23,6 +25,11 @@ public class ResendFileListener implements IMqttMessageListener {
         if (!serviceName.equals(envelope.getTargetService())) {
             return;
         }
+
+        log.info(
+                "Received resend file event: fileId={}, fileName={}, sourceService={}",
+                envelope.getPayload().getFileId(), envelope.getPayload().getFileName(), envelope.getSourceService()
+        );
 
         fileService.resendFile(envelope.getPayload(), envelope.getSourceService());
     }
