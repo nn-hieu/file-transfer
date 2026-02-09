@@ -60,7 +60,7 @@ public class MqttConnection implements SmartLifecycle {
             log.info("Connecting to MQTT broker...");
 
             MqttConnectOptions options = new MqttConnectOptions();
-            options.setCleanSession(true);
+            options.setCleanSession(false);
             options.setAutomaticReconnect(true);
             options.setConnectionTimeout(10);
 
